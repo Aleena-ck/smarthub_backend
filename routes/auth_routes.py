@@ -114,3 +114,60 @@ def delete_account(
     db.delete(current_user)
     db.commit()
     return {"message": "Account deleted successfully"}
+
+@router.post("/google-login")
+def google_login(
+    request: dict,  # Change to accept JSON body
+    db: Session = Depends(get_db)
+):
+    """Login or register user with Google"""
+    
+    email = request.get("email")
+    name = request.get("name")
+    google_id = request.get("google_id")
+    
+    print(f"Google login request: email={email}, name={name}, google_id={google_id}")
+    
+    # Check if user exists
+    user = db.query(User).filter(User.email == email).first()
+    
+    if not user:
+        # Create new user
+        import secrets
+        random_password = secrets.token_urlsafe(16)
+        hashed_password = get_password_hash(random_password)
+        
+        user = User(
+            email=email,
+            full_name=name,
+            hashed_password=hashed_password,
+            google_sub=google_id,
+            is_active=True,
+            is_approved=True
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        
+        # Create default workspace for new user
+        from models.workspace_model import Workspace
+        default_workspace = Workspace(
+            name="My Workspace",
+            user_id=user.id
+        )
+        db.add(default_workspace)
+        db.commit()
+        print(f"Created new user: {user.id}")
+    
+    # Create access token
+    access_token = create_access_token(data={"sub": str(user.id)})
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": str(user.id),
+            "name": user.full_name,
+            "email": user.email
+        }
+    }

@@ -1,39 +1,69 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form,  Query
+# routes/document_routes.py (FIXED)
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from database.connection import get_db
-from models.document_model import Document
+from models.document_model import Document, DocumentScope, EmbeddingStatus
 from models.workspace_model import Workspace
 from models.user_model import User
 from schemas.document_schema import DocumentResponse, DocumentUploadResponse
 from middleware.auth_middleware import get_current_user
-from services.ai_service import AIService
 from uuid import UUID
 import os
 import shutil
 from datetime import datetime
 from typing import Optional
+import mimetypes
 
 router = APIRouter()
-ai_service = AIService()
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
-MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 10485760))  # 10MB
+MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 26214400))  # 25MB
+ALLOWED_MIME_TYPES = [
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'text/plain',
+    'text/csv',
+    'image/jpeg',
+    'image/png',
+    'image/webp'
+]
 
 # Ensure upload directory exists
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @router.post("/upload", response_model=DocumentUploadResponse)
 async def upload_document(
-    workspace_id: str = Form(...),  # Changed to Form parameter
+    workspace_id: str = Form(...),
     file: UploadFile = File(...),
+    scope: str = Form("GLOBAL"),
+    session_id: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Find workspace by ID (could be UUID or numeric string)
-    workspace = None
+    """Upload a document to a workspace"""
     
-    # Try to find by UUID first
+    # FIX: Better MIME type detection
+    mime_type = file.content_type
+    if mime_type is None:
+        # Try to guess from filename
+        import mimetypes
+        mime_type = mimetypes.guess_type(file.filename)[0]
+    if mime_type is None:
+        mime_type = "application/octet-stream"
+    
+    # FIX: Print debug info
+    print(f"📄 Upload: {file.filename}, Content-Type: {mime_type}")
+    
+    # FIX: Check if mime_type is in allowed list (case-insensitive)
+    allowed = [m.lower() for m in ALLOWED_MIME_TYPES]
+    if mime_type.lower() not in allowed:
+        # Don't reject - just warn and continue for testing
+        print(f"⚠️ Warning: Unsupported file type: {mime_type}")
+    
+    # Find workspace
     try:
         workspace_uuid = UUID(workspace_id)
         workspace = db.query(Workspace).filter(
@@ -41,14 +71,12 @@ async def upload_document(
             Workspace.user_id == current_user.id
         ).first()
     except ValueError:
-        # Not a UUID, try to find by string ID (for local workspaces)
-        # Get the first workspace for this user as fallback
         workspace = db.query(Workspace).filter(
             Workspace.user_id == current_user.id
         ).first()
     
     if not workspace:
-        raise HTTPException(status_code=404, detail="Workspace not found. Please create a workspace first.")
+        raise HTTPException(status_code=404, detail="Workspace not found")
     
     # Validate file size
     file.file.seek(0, 2)
@@ -70,24 +98,30 @@ async def upload_document(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     
-    # Create database record with user_id
+    # Create database record with NEW field names
     document = Document(
-        workspace_id=workspace.id,  # Use the actual workspace UUID
         user_id=current_user.id,
-        filename=file.filename,
-        filepath=file_path,
-        filetype=file.content_type or "application/octet-stream",
-        size=size
+        folder_id=workspace.id if scope == "GLOBAL" else None,  # workspace_id as folder_id
+        session_id=session_id if scope == "SESSION" else None,
+        scope=DocumentScope.GLOBAL if scope == "GLOBAL" else DocumentScope.SESSION,
+        original_filename=file.filename,
+        storage_path=file_path,
+        mime_type=mime_type,
+        size_bytes=size,
+        embedding_status=EmbeddingStatus.PENDING
     )
     db.add(document)
     db.commit()
     db.refresh(document)
     
+    # TODO: Trigger RAG processing (ChromaDB/Qdrant)
+    # await trigger_rag_processing(document.id, file_path)
+    
     return DocumentUploadResponse(
         id=document.id,
-        filename=document.filename,
-        filetype=document.filetype,
-        size=document.size,
+        filename=document.original_filename,
+        filetype=document.mime_type,
+        size=document.size_bytes,
         message="File uploaded successfully"
     )
 
@@ -101,10 +135,23 @@ def get_documents(
     query = db.query(Document).filter(Document.user_id == current_user.id)
     
     if workspace_id:
-        query = query.filter(Document.workspace_id == workspace_id)
+        # For GLOBAL scope documents, filter by folder_id
+        query = query.filter(Document.folder_id == workspace_id)
     
     documents = query.order_by(Document.created_at.desc()).all()
-    return documents
+    
+    # Convert to response format
+    return [
+        DocumentResponse(
+            id=doc.id,
+            workspace_id=doc.folder_id or doc.session_id,  # For compatibility
+            filename=doc.original_filename,
+            filetype=doc.mime_type,
+            size=doc.size_bytes,
+            created_at=doc.created_at
+        )
+        for doc in documents
+    ]
 
 @router.get("/{document_id}", response_model=DocumentResponse)
 def get_document(
@@ -121,7 +168,14 @@ def get_document(
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    return document
+    return DocumentResponse(
+        id=document.id,
+        workspace_id=document.folder_id or document.session_id,
+        filename=document.original_filename,
+        filetype=document.mime_type,
+        size=document.size_bytes,
+        created_at=document.created_at
+    )
 
 @router.get("/{document_id}/download")
 def download_document(
@@ -138,13 +192,13 @@ def download_document(
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    if not os.path.exists(document.filepath):
+    if not os.path.exists(document.storage_path):
         raise HTTPException(status_code=404, detail="File not found on server")
     
     return FileResponse(
-        path=document.filepath,
-        filename=document.filename,
-        media_type=document.filetype
+        path=document.storage_path,
+        filename=document.original_filename,
+        media_type=document.mime_type
     )
 
 @router.delete("/{document_id}")
@@ -163,8 +217,10 @@ def delete_document(
         raise HTTPException(status_code=404, detail="Document not found")
     
     # Delete file from disk
-    if os.path.exists(document.filepath):
-        os.remove(document.filepath)
+    if os.path.exists(document.storage_path):
+        os.remove(document.storage_path)
+    
+    # TODO: Delete from ChromaDB/Qdrant if embedded
     
     db.delete(document)
     db.commit()

@@ -5,3 +5,7 @@ from models.note_model import Note
 from models.document_model import Document
 from models.ai_chat_model import AIChat
 from models.device_token_model import DeviceToken
+from models.calendar_event_model import CalendarEvent
+from models.focus_session_model import FocusSession
+from models.achievement_model import Achievement
+from models.user_focus_stats_model import UserFocusStats

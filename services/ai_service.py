@@ -150,3 +150,30 @@ class AIService:
         Keep response under 200 characters, be encouraging and provide 1 tip."""
         
         return await self.ollama.generate(prompt)
+    
+    # services/ollama_service.py - Add this method
+
+async def generate_stream(self, prompt: str, context: str = None):
+    """Stream response token by token"""
+    full_prompt = prompt
+    if context:
+        full_prompt = f"Context: {context}\n\nUser: {prompt}\n\nAssistant:"
+    
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": full_prompt,
+                    "stream": True,
+                }
+            ) as response:
+                async for line in response.aiter_lines():
+                    if line:
+                        import json
+                        data = json.loads(line)
+                        yield data.get("response", "")
+    except Exception as e:
+        yield f"Error: {str(e)}"

@@ -8,6 +8,10 @@ from middleware.auth_middleware import get_current_user
 from services.ai_service import AIService
 from uuid import UUID
 from typing import Optional
+from datetime import datetime
+from fastapi.responses import StreamingResponse
+import json
+import asyncio
 
 router = APIRouter()
 ai_service = AIService()
@@ -158,3 +162,69 @@ async def get_weekly_report(
     """Get AI weekly productivity report"""
     report = await ai_service.get_weekly_report(db, current_user.id)
     return {"report": report}
+
+
+@router.post("/chat/stream")
+async def chat_stream(
+    request: ChatRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Send a message to AI with streaming response"""
+    
+    async def generate_stream():
+        # Get or create chat session
+        chat_id = request.chat_id
+        if chat_id:
+            chat = db.query(AIChat).filter(
+                AIChat.id == chat_id,
+                AIChat.user_id == current_user.id
+            ).first()
+        else:
+            chat = None
+        
+        if not chat:
+            chat = AIChat(
+                user_id=current_user.id,
+                workspace_id=request.workspace_id,
+                title=request.prompt[:50],
+                messages=[]
+            )
+            db.add(chat)
+            db.commit()
+            db.refresh(chat)
+        
+        # Build context
+        context = ""
+        if chat.messages:
+            last_messages = chat.messages[-4:]
+            for msg in last_messages:
+                context += f"{msg['role']}: {msg['content']}\n"
+        
+        # Get streaming response from Ollama
+        full_response = ""
+        async for chunk in ai_service.ollama.generate_stream(request.prompt, context):
+            full_response += chunk
+            # Send each chunk as JSON
+            yield json.dumps({"response": chunk}) + "\n"
+            await asyncio.sleep(0.01)  # Small delay for smooth streaming
+        
+        # Save messages
+        messages = chat.messages or []
+        messages.append({
+            "role": "user",
+            "content": request.prompt,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+        messages.append({
+            "role": "assistant",
+            "content": full_response,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+        chat.messages = messages
+        db.commit()
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="application/x-ndjson"
+    )
