@@ -10,28 +10,9 @@ from uuid import UUID
 from typing import Optional
 
 router = APIRouter()
+# backend/routes/task_routes.py
 
-@router.post("/", response_model=TaskResponse)
-def create_task(
-    task: TaskCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Create a new task"""
-    # Verify workspace belongs to user
-    workspace = db.query(Workspace).filter(
-        Workspace.id == task.workspace_id,
-        Workspace.user_id == current_user.id
-    ).first()
-    
-    if not workspace:
-        raise HTTPException(status_code=404, detail="Workspace not found")
-    
-    db_task = Task(**task.model_dump())
-    db.add(db_task)
-    db.commit()
-    db.refresh(db_task)
-    return db_task
+# backend/routes/task_routes.py - Add this before the other routes
 
 @router.get("/")
 def get_tasks(
@@ -55,22 +36,35 @@ def get_tasks(
     
     return {"total": total, "tasks": tasks}
 
-@router.get("/{task_id}", response_model=TaskResponse)
-def get_task(
-    task_id: UUID,
+@router.post("/", response_model=TaskResponse)
+def create_task(
+    task: TaskCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get task by ID"""
-    task = db.query(Task).filter(
-        Task.id == task_id,
-        Task.user_id == current_user.id
+    """Create a new task"""
+    workspace = db.query(Workspace).filter(
+        Workspace.id == task.workspace_id,
+        Workspace.user_id == current_user.id
     ).first()
     
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
     
-    return task
+    # ✅ Use deadline (not due_date)
+    db_task = Task(
+        user_id=current_user.id,
+        workspace_id=task.workspace_id,
+        title=task.title,
+        description=task.description,
+        priority=task.priority,
+        deadline=task.deadline,  # ← Changed from due_date
+        reminder_enabled=task.reminder_at is not None,
+    )
+    db.add(db_task)
+    db.commit()
+    db.refresh(db_task)
+    return db_task
 
 @router.put("/{task_id}", response_model=TaskResponse)
 def update_task(
@@ -88,20 +82,31 @@ def update_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    for key, value in task_update.model_dump(exclude_unset=True).items():
-        setattr(task, key, value)
+    # ✅ Update fields
+    if task_update.title is not None:
+        task.title = task_update.title
+    if task_update.description is not None:
+        task.description = task_update.description
+    if task_update.priority is not None:
+        task.priority = task_update.priority
+    if task_update.status is not None:
+        task.status = task_update.status
+    if task_update.deadline is not None:  # ← Changed from due_date
+        task.deadline = task_update.deadline
+    if task_update.reminder_at is not None:
+        task.reminder_at = task_update.reminder_at
     
     db.commit()
     db.refresh(task)
     return task
 
-@router.delete("/{task_id}")
-def delete_task(
+@router.get("/{task_id}", response_model=TaskResponse)
+def get_task(
     task_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Delete task"""
+    """Get task by ID"""
     task = db.query(Task).filter(
         Task.id == task_id,
         Task.user_id == current_user.id
@@ -110,6 +115,17 @@ def delete_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    db.delete(task)
-    db.commit()
-    return {"message": "Task deleted successfully"}
+    # ✅ Map deadline to due_date for response
+    response_data = {
+        "id": task.id,
+        "workspace_id": task.workspace_id,
+        "title": task.title,
+        "description": task.description,
+        "priority": task.priority,
+        "status": task.status,
+        "deadline": task.deadline,  # ← Changed from due_date
+        "reminder_at": task.reminder_at,
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
+    }
+    return response_data

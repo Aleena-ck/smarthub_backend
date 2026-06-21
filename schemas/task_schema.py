@@ -5,22 +5,23 @@ from uuid import UUID
 from enum import Enum
 
 class TaskPriority(str, Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
+    LOW = "LOW"              # ✅ Changed from "low" to "LOW"
+    MEDIUM = "MEDIUM"        # ✅ Changed from "medium" to "MEDIUM"
+    HIGH = "HIGH"            # ✅ Changed from "high" to "HIGH"
+    CRITICAL = "CRITICAL"    # ✅ Already correct
 
 class TaskStatus(str, Enum):
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    ARCHIVED = "archived"
+    PENDING = "PENDING"              # ✅ Changed from "pending" to "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"      # ✅ Changed from "in_progress" to "IN_PROGRESS"
+    COMPLETED = "COMPLETED"          # ✅ Changed from "completed" to "COMPLETED"
+    CANCELLED = "CANCELLED"          # ✅ Changed from "archived" to "CANCELLED" (match frontend)
 
 class TaskCreate(BaseModel):
     workspace_id: UUID
     title: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = Field(None, max_length=5000)
     priority: Optional[TaskPriority] = TaskPriority.MEDIUM
-    due_date: Optional[datetime] = None
+    deadline: Optional[datetime] = None  # ← Changed from due_date
     reminder_at: Optional[datetime] = None
 
 class TaskUpdate(BaseModel):
@@ -28,7 +29,7 @@ class TaskUpdate(BaseModel):
     description: Optional[str] = Field(None, max_length=5000)
     priority: Optional[TaskPriority] = None
     status: Optional[TaskStatus] = None
-    due_date: Optional[datetime] = None
+    deadline: Optional[datetime] = None 
     reminder_at: Optional[datetime] = None
 
 class TaskResponse(BaseModel):
@@ -38,8 +39,8 @@ class TaskResponse(BaseModel):
     description: Optional[str]
     priority: TaskPriority
     status: TaskStatus
-    due_date: Optional[datetime]
-    reminder_at: Optional[datetime]
+    deadline: Optional[datetime] = None  # ← Changed from due_date
+    reminder_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

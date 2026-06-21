@@ -28,7 +28,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     
     # Create default workspace for new user
     default_workspace = Workspace(
-        name="My Workspace",
+        name="General",
         user_id=db_user.id
     )
     db.add(default_workspace)
@@ -152,7 +152,7 @@ def google_login(
         # Create default workspace for new user
         from models.workspace_model import Workspace
         default_workspace = Workspace(
-            name="My Workspace",
+            name="General",
             user_id=user.id
         )
         db.add(default_workspace)

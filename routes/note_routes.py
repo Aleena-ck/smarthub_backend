@@ -26,7 +26,10 @@ def create_note(
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
     
-    db_note = Note(**note.model_dump())
+    # FIX: user_id must be set explicitly — NoteCreate schema (and therefore
+    # note.model_dump()) has no user_id field, so it must come from the
+    # authenticated user, not from client input.
+    db_note = Note(**note.model_dump(), user_id=current_user.id)
     db.add(db_note)
     db.commit()
     db.refresh(db_note)

@@ -80,6 +80,7 @@ app.include_router(calendar_routes.router, prefix="/calendar", tags=["Calendar"]
 app.include_router(focus_routes.router, prefix="/focus", tags=["Focus"])
 app.include_router(dashboard_routes.router, prefix="/dashboard", tags=["Dashboard"])
 
+
 @app.get("/")
 def root():
     return {"message": "SmartHub API Running", "version": "2.0.0"}
@@ -87,4 +88,24 @@ def root():
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
-# Run with: uvicorn main:app --reload --host 0.0.0.0 --port 8000
+#   .\venv\Scripts\Activate.ps1  
+#   uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+"""
+# Show root folder + immediate subfolders with their files (no nested folders)
+Get-ChildItem | ForEach-Object { 
+    if ($_.PSIsContainer) {
+        Write-Host "`n📁 $($_.Name)/" -ForegroundColor Cyan
+        # Show only files in this folder (no subfolders)
+        Get-ChildItem $_.FullName -File | ForEach-Object {
+            Write-Host "  📄 $($_.Name)" -ForegroundColor Gray
+        }
+        # Count subfolders but don't show them
+        $subFolderCount = (Get-ChildItem $_.FullName -Directory).Count
+        if ($subFolderCount -gt 0) {
+            Write-Host "  ... ($subFolderCount subfolders)" -ForegroundColor DarkGray
+        }
+    } else {
+        Write-Host "📄 $($_.Name)" -ForegroundColor White
+    }
+}"""
